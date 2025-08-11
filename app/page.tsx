@@ -336,10 +336,10 @@ export default function DashboardPage() {
                 <YAxis stroke={subtext} />
                 <Tooltip />
                 <Legend />
-                {stacked.keys.map((k, i) => {
-                  const colors = [PASTELS.purple, PASTELS.sky, PASTELS.coral, PASTELS.mint, PASTELS.pink, PASTELS.lime];
-                  return <Bar key={k} dataKey={k} stackId="a" fill={colors[i % colors.length]} radius={[6, 6, 0, 0]} />;
-                })}
+                {(stacked.keys as string[]).map((k: string, i: number) => {
+  const colors = [PASTELS.purple, PASTELS.sky, PASTELS.coral, PASTELS.mint, PASTELS.pink, PASTELS.lime];
+  return <Bar key={k} dataKey={k} stackId="a" fill={colors[i % colors.length]} radius={[6, 6, 0, 0]} />;
+})}
               </BarChart>
             </ResponsiveContainer>
           </div>
