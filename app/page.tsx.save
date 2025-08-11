@@ -1,0 +1,154 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area, Legend
+} from "recharts";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
+
+const DASHBOARD_API = "/api/dashboard";
+
+export default function DashboardPage() {
+const safeData = data ?? {};
+const salesPerDay = Array.isArray(safeData.salesPerDay) ? safeData.salesPerDay : [];
+const agentLeaderboard = Array.isArray(safeData.agentLeaderboard) ? safeData.agentLeaderboard : [];
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(DASHBOARD_API);
+      const json = await res.json();
+      setData(json);
+    } catch (err) {
+      console.error("Error fetching data", err);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  if (!data) {
+    return (
+      <main className="p-6">
+        <p>Loading dashboard...</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Sales Dashboard</h1>
+        <Button onClick={fetchData} disabled={loading}>
+          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
+      </div>
+
+      {/* KPI Tiles */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-gray-500">Total Sales</p>
+            <p className="text-2xl font-bold">{data.totalSales}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-gray-500">Total Agents</p>
+            <p className="text-2xl font-bold">{data.totalAgents}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-gray-500">Average per Agent</p>
+            <p className="text-2xl font-bold">{data.avgPerAgent}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Sales per Day */}
+      <Card>
+        <CardContent className="p-4">
+          <h2 className="text-xl font-semibold mb-4">Sales per Day</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={salesPerDay}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Line type="monotone" dataKey="sales" stroke="#2563eb" />
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Agent Leaderboard */}
+      <Card>
+        <CardContent className="p-4">
+          <h2 className="text-xl font-semibold mb-4">Top Agents</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={agentLeaderboard}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="agent" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="sales" fill="#16a34a" />
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Agent Trends */}
+      <Card>
+        <CardContent className="p-4">
+          <h2 className="text-xl font-semibold mb-4">Agent Trends</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={data.agentTrends}>
+              <defs>
+                <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="date" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Area type="monotone" dataKey="sales" stroke="#3b82f6" fillOpacity={1} fill="url(#colorSales)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Daily Totals Table */}
+      <Card>
+        <CardContent className="p-4">
+          <h2 className="text-xl font-semibold mb-4">Daily Totals</h2>
+          <table className="min-w-full text-left">
+            <thead>
+              <tr>
+                <th className="px-4 py-2">Date</th>
+                <th className="px-4 py-2">Sales</th>
+              </tr>
+            </thead>
+            <tbody>
+              {salesPerDay.map((row: any, idx: number) => (
+                <tr key={idx} className="border-t">
+                  <td className="px-4 py-2">{row.date}</td>
+                  <td className="px-4 py-2">{row.sales}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}

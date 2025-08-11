@@ -1,0 +1,5 @@
+node_modules/
+.next/
+backups/
+.env
+.DS_Store
