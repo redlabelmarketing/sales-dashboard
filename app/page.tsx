@@ -14,44 +14,24 @@ import {
   LabelList,
 } from "recharts";
 import { RefreshCw, Moon, Sun } from "lucide-react";
-
+type Theme = {
+  bg: string; panel: string; border: string; text: string; subtext: string; chip: string;
+  purple: string; sky: string; coral: string; mint: string; pink: string; lime: string; red: string;
+  card: string;
+};
 /** ---------- Themes ---------- */
-const THEMES = {
+const THEMES: Record<"dark"|"light", Theme> = {
   dark: {
-    bg: "#0f172a",
-    panel: "#0b1223",
-    border: "#243244",
-    text: "#e5e7eb",
-    subtext: "#9ca3af",
-    chip: "#e5e7eb",
-    purple: "#b3a3ff",
-    sky: "#a4d1ff",
-    coral: "#ffb3b3",
-    mint: "#b6f0cf",
-    pink: "#ffc3e1",
-    lime: "#d8ff9a",
-    red: "#ffb4a8",
-    green: "#b7f3b0",
+    bg: "#0f172a", panel: "#0b1223", border: "#243244", text: "#e5e7eb", subtext: "#9ca3af", chip: "#e5e7eb",
+    purple: "#b3a3ff", sky: "#9bd2ff", coral: "#ffb6a1", mint: "#a8f0d1", pink: "#ffc0cb", lime: "#c7f59f", red: "#f87171",
     card: "#111827",
   },
   light: {
-    bg: "#f7f8fb",
-    panel: "#ffffff",
-    border: "#e5e7eb",
-    text: "#111827",
-    subtext: "#6b7280",
-    chip: "#111827",
-    purple: "#7c6cf2",
-    sky: "#3ba5f6",
-    coral: "#ff7a7a",
-    mint: "#2dd4bf",
-    pink: "#ec4899",
-    lime: "#84cc16",
-    red: "#fb7185",
-    green: "#22c55e",
+    bg: "#f7f8fb", panel: "#ffffff", border: "#e5e7eb", text: "#111827", subtext: "#6b7280", chip: "#111827",
+    purple: "#7c6cf2", sky: "#3ba4f6", coral: "#ff8f70", mint: "#49d3a6", pink: "#ff7ea8", lime: "#8ddf4f", red: "#ef4444",
     card: "#ffffff",
   },
-} as const;
+};
 
 const DASHBOARD_API = "/api/dashboard";
 
@@ -386,10 +366,10 @@ export default function DashboardPage() {
           marginBottom: 18,
         }}
       >
-        <StatCard label={mode === "DAY" ? "Total Sales (Day)" : "Total Sales"} value={headerStats.totalSales ?? 0} T={T} />
-        <StatCard label={mode === "DAY" ? "Agents (Day)" : "Total Agents"} value={headerStats.totalAgents ?? 0} T={T} />
-        <StatCard label="Avg per Rep" value={headerStats.avgPerAgent ?? "0.00"} T={T} />
-        <StatCard label={mode === "DAY" ? "Agents (Day)" : "Avg Daily Agents"} value={headerStats.avgDailyAgents ?? 0} T={T} />
+        <StatCard label={mode === "DAY" ? "Total Sales (Day)" : "Total Sales"} value={headerStats?.totalSales ?? 0} T={T} />
+<StatCard label={mode === "DAY" ? "Agents (Day)" : "Total Agents"} value={headerStats?.totalAgents ?? 0} T={T} />
+<StatCard label="Avg per Rep" value={headerStats?.avgPerAgent ?? "0.00"} T={T} />
+<StatCard label={mode === "DAY" ? "Agents (Day)" : "Avg Daily Agents"} value={headerStats?.avgDailyAgents ?? 0} T={T} />
       </section>
 
       {/* RANGE: Sales per day */}
