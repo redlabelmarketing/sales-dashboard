@@ -1,470 +1,499 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
   BarChart,
   Bar,
-  AreaChart,
-  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ReferenceLine,
+  LabelList,
 } from "recharts";
+import { RefreshCw } from "lucide-react";
 
-/* ───────────────── CONFIG / THEME ───────────────── */
-const DASHBOARD_API = "/api/dashboard";
-
-// Brand + pastel palette (soft)
-const BRAND_RED = "#b91c1c";
-const BRAND_RED_SOFT = "#fee2e2";
+/** ---------- Pastel palette ---------- */
 const PASTELS = {
-  blue: "#9ec5fe",
-  green: "#b6f0c3",
-  amber: "#ffd59e",
-  red: "#ffb3b3",
-  purple: "#e3c6ff",
-  sky: "#bde0fe",
-  coral: "#ffc9b9",
-  mint: "#d3f9d8",
-  pink: "#ffd6e7",
-  lime: "#e9f5c9",
+  bg: "#0f172a", // page bg for dark feel
+  panel: "#0b1223",
+  border: "#243244",
+  text: "#e5e7eb",
+  subtext: "#9ca3af",
+  chip: "#e5e7eb",
+  // series
+  purple: "#b3a3ff",
+  sky: "#a4d1ff",
+  coral: "#ffb3b3",
+  mint: "#b6f0cf",
+  pink: "#ffc3e1",
+  lime: "#d8ff9a",
+  red: "#ffb4a8",
+  green: "#b7f3b0",
 };
 
-/* ───────────────── HELPERS ───────────────── */
-type Mode = "RANGE" | "DAY";
-const fmtNum = (n: number) => Intl.NumberFormat().format(n);
+const DASHBOARD_API = "/api/dashboard";
 
-function normalizePayload(json: any) {
-  return {
-    ...json,
-    ok: json?.ok ?? true,
-    updatedAt: json?.updatedAt ?? new Date().toISOString(),
-    salesPerDay: Array.isArray(json?.salesPerDay) ? json.salesPerDay : [],
-    agentDaily: Array.isArray(json?.agentDaily) ? json.agentDaily : [],
-    agentLeaderboard: Array.isArray(json?.agentLeaderboard) ? json.agentLeaderboard : [],
-    perAgentKPI: Array.isArray(json?.perAgentKPI) ? json.perAgentKPI : [],
-    totalSales: Number(json?.totalSales ?? 0),
-    totalAgents: Number(json?.totalAgents ?? 0),
-    avgPerAgent: Number(json?.avgPerAgent ?? 0),
-    avgDailyAgents: Number(json?.avgDailyAgents ?? 0),
-    totalKPI: Number(json?.totalKPI ?? 0),
-    date: json?.date ?? undefined,
-  };
+/** ---------- Types from API ---------- */
+type AgentKPI = { agent: string; sales: number; status?: "FT" | "PT"; goal?: number; percent?: number };
+type SalesPerDay = { date: string; sales: number };
+type AgentDaily = { date: string; byAgent: AgentKPI[] };
+
+type RangePayload = {
+  ok: boolean;
+  updatedAt?: string;
+  salesPerDay?: SalesPerDay[];
+  agentDaily?: AgentDaily[];
+  agentLeaderboard?: AgentKPI[];
+  totalSales?: number;
+  totalAgents?: number;
+  avgPerAgent?: number;
+  avgDailyAgents?: number;
+};
+
+type DayPayload = {
+  ok: boolean;
+  date?: string; // YYYY-MM-DD
+  perAgentKPI?: AgentKPI[];
+  totalKPI?: number;
+  dayGoal?: number;
+  dayPercent?: number;
+  note?: string;
+};
+
+/** ---------- Small UI helpers ---------- */
+function Panel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      style={{
+        background: PASTELS.panel,
+        border: `1px solid ${PASTELS.border}`,
+        borderRadius: 16,
+        padding: 16,
+        boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+      }}
+    >
+      <h3 style={{ margin: 0, marginBottom: 12, color: PASTELS.text, fontWeight: 600 }}>{title}</h3>
+      {children}
+    </section>
+  );
 }
 
-function buildStacked(
-  agentDaily: { date: string; byAgent: { agent: string; sales: number }[] }[],
-  topN = 6
-) {
-  if (!agentDaily || agentDaily.length === 0) return { data: [] as any[], keys: [] as string[] };
-
-  const totals: Record<string, number> = {};
-  for (const d of agentDaily) {
-    for (const a of d.byAgent || []) {
-      totals[a.agent] = (totals[a.agent] || 0) + (a.sales || 0);
-    }
-  }
-  const ranked = Object.entries(totals)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, topN)
-    .map(([name]) => name);
-
-  const data = agentDaily.map((d) => {
-    const row: Record<string, any> = { date: d.date };
-    for (const a of d.byAgent || []) {
-      if (ranked.includes(a.agent)) row[a.agent] = (row[a.agent] || 0) + (a.sales || 0);
-    }
-    return row;
-  });
-
-  return { data, keys: ranked };
+function StatCard({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        background: "#111827",
+        border: `1px solid ${PASTELS.border}`,
+        borderRadius: 14,
+        padding: 16,
+        boxShadow: "0 4px 14px rgba(0,0,0,0.3)",
+      }}
+    >
+      <div style={{ color: PASTELS.subtext, fontSize: 12, marginBottom: 6 }}>{label}</div>
+      <div style={{ color: PASTELS.text, fontSize: 22, fontWeight: 700 }}>{value}</div>
+    </div>
+  );
 }
 
-/* ───────────────── PAGE ───────────────── */
+/** ---------- Data fetchers ---------- */
+async function fetchRange(n: number): Promise<RangePayload> {
+  const res = await fetch(`${DASHBOARD_API}?days=${encodeURIComponent(n)}`);
+  return res.json();
+}
+async function fetchDay(mmddyyyy: string): Promise<DayPayload> {
+  const res = await fetch(`${DASHBOARD_API}?date=${encodeURIComponent(mmddyyyy)}`);
+  return res.json();
+}
+
+/** ---------- Page ---------- */
 export default function DashboardPage() {
-  const [mode, setMode] = useState<Mode>("RANGE");
+  const [mode, setMode] = useState<"RANGE" | "DAY">("RANGE");
   const [rangeDays, setRangeDays] = useState<number>(30);
-  const [pickedDate, setPickedDate] = useState<string>(""); // YYYY-MM-DD
+  const [selectedDate, setSelectedDate] = useState<string>(""); // MM-DD-YYYY
+  const [rangeData, setRangeData] = useState<RangePayload | null>(null);
+  const [dayData, setDayData] = useState<DayPayload | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const [dark, setDark] = useState<boolean>(false);
-  const [data, setData] = useState<any>(null);
-  const [sortKey, setSortKey] = useState<"agent" | "sales">("sales");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [errorMsg, setErrorMsg] = useState<string>("");
+  const [err, setErr] = useState<string>("");
 
-  // Theme tokens
-  const bg = dark ? "#0b1020" : "#f7f8fb";
-  const bgAccent = dark ? "linear-gradient(180deg, #0b1020, #0f1530)" : "linear-gradient(180deg, #f7f8fb, #eef2f7)";
-  const panel = dark ? "#111827" : "#ffffff";
-  const text = dark ? "#e5e7eb" : "#0f172a";
-  const subtext = dark ? "#9ca3af" : "#475569";
-  const border = dark ? "#1f2937" : "#e5e7eb";
-  const shadow = dark ? "0 10px 24px rgba(0,0,0,0.25)" : "0 10px 24px rgba(17,24,39,0.07)";
-
-  // Fetchers
-  async function fetchRange(n: number) {
-    setLoading(true); setErrorMsg("");
-    try {
-      const url = `${DASHBOARD_API}?days=${encodeURIComponent(n)}`;
-      const res = await fetch(url, { cache: "no-store" });
-      const json = await res.json();
-      setData(normalizePayload(json));
-    } catch {
-      setErrorMsg("Failed to load range");
-    } finally {
-      setLoading(false);
-    }
-  }
-  async function fetchDay(yyyyMmDd: string) {
-    if (!yyyyMmDd) return;
-    setLoading(true); setErrorMsg("");
-    try {
-      const [yyyy, mm, dd] = yyyyMmDd.split("-");
-      const mmddyyyy = `${mm}-${dd}-${yyyy}`;
-      const url = `${DASHBOARD_API}?date=${encodeURIComponent(mmddyyyy)}`;
-      const res = await fetch(url, { cache: "no-store" });
-      const json = await res.json();
-      setData(normalizePayload(json));
-    } catch {
-      setErrorMsg("Failed to load day");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Load on switches
-  useEffect(() => { if (mode === "RANGE") fetchRange(rangeDays); }, [mode, rangeDays]);
-  useEffect(() => { if (mode === "DAY" && pickedDate) fetchDay(pickedDate); }, [mode, pickedDate]);
-
-  // Leaderboard source: Day => perAgentKPI ; Range => agentLeaderboard
-  const leaderboard = useMemo(() => {
-    const source =
-      mode === "DAY" && (data?.perAgentKPI?.length ?? 0) > 0
-        ? data.perAgentKPI
-        : data?.agentLeaderboard || [];
-    const arr = Array.isArray(source) ? [...source] : [];
-    arr.sort((a: any, b: any) => {
-      const dir = sortDir === "asc" ? 1 : -1;
-      if (sortKey === "agent") return a.agent.localeCompare(b.agent) * dir;
-      return ((a.sales || 0) - (b.sales || 0)) * dir;
-    });
-    return arr;
-  }, [data, sortKey, sortDir, mode]);
-
-  // Stacked bar
-  const stacked = useMemo(() => {
-    if (mode === "DAY" && (data?.perAgentKPI?.length ?? 0) > 0) {
-      const iso = data?.date || "Selected";
-      return {
-        data: [{ date: iso, ...Object.fromEntries(data.perAgentKPI.map((r: any) => [r.agent, r.sales])) }],
-        keys: data.perAgentKPI.slice(0, 6).map((r: any) => r.agent),
-      };
-    }
-    return buildStacked(data?.agentDaily || [], 6);
-  }, [data?.agentDaily, data?.perAgentKPI, data?.date, mode]);
-
-  // ✅ KPIs by mode
-  const kpis = useMemo(() => {
-    if (mode === "DAY") {
-      const totalKPI = Number(data?.totalKPI || 0);
-      const agents = Array.isArray(data?.perAgentKPI) ? data.perAgentKPI.length : 0;
-      const apr = agents ? +(totalKPI / agents).toFixed(2) : 0;
-      return {
-        totalSales: totalKPI,
-        totalAgents: agents,
-        avgPerAgent: apr,
-        avgDailyAgents: agents,
-        labelSuffix: " (day)",
-      };
-    }
-    return {
-      totalSales: Number(data?.totalSales || 0),
-      totalAgents: Number(data?.totalAgents || 0),
-      avgPerAgent: Number(data?.avgPerAgent || 0),
-      avgDailyAgents: Number(data?.avgDailyAgents || 0),
-      labelSuffix: "",
+  // Initial load & when controls change
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        setLoading(true);
+        setErr("");
+        if (mode === "RANGE") {
+          const json = await fetchRange(rangeDays);
+          if (!cancel) setRangeData(json);
+        } else if (mode === "DAY" && selectedDate) {
+          const json = await fetchDay(selectedDate);
+          if (!cancel) setDayData(json);
+        }
+      } catch (e: any) {
+        if (!cancel) setErr(String(e?.message || e));
+      } finally {
+        if (!cancel) setLoading(false);
+      }
+    })();
+    return () => {
+      cancel = true;
     };
-  }, [mode, data]);
+  }, [mode, rangeDays, selectedDate]);
+
+  /** Build stacked series for RANGE mode from top agents across days */
+  const stacked = useMemo<{ data: any[]; keys: string[] }>(() => {
+    if (mode !== "RANGE") return { data: [], keys: [] };
+    const daily = rangeData?.agentDaily ?? [];
+    // collect top 6 agents overall
+    const counts: Record<string, number> = {};
+    daily.forEach((d) =>
+      (d.byAgent || []).forEach((r) => {
+        counts[r.agent] = (counts[r.agent] || 0) + r.sales;
+      })
+    );
+    const top = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name]) => name);
+
+    // build rows
+    const rows = daily.map((d) => {
+      const row: any = { date: d.date };
+      top.forEach((name) => {
+        const found = d.byAgent.find((x) => x.agent === name);
+        row[name] = found ? found.sales : 0;
+      });
+      return row;
+    });
+    return { data: rows, keys: top };
+  }, [mode, rangeData?.agentDaily]);
+
+  // Handy computed stats for header cards
+  const headerStats = useMemo(() => {
+    if (mode === "DAY") {
+      const totalAgents = dayData?.perAgentKPI?.length ?? 0;
+      const totalSales = dayData?.totalKPI ?? 0;
+      const avgPerAgent = totalAgents ? (totalSales / totalAgents).toFixed(2) : "0.00";
+      const avgDailyAgents = totalAgents; // for a single day
+      return { totalSales, totalAgents, avgPerAgent, avgDailyAgents };
+    } else {
+      return {
+        totalSales: rangeData?.totalSales ?? 0,
+        totalAgents: rangeData?.totalAgents ?? 0,
+        avgPerAgent: (rangeData?.avgPerAgent ?? 0).toFixed(2),
+        avgDailyAgents: rangeData?.avgDailyAgents ?? 0,
+      };
+    }
+  }, [mode, dayData, rangeData]);
 
   return (
-    <main style={{ padding: 24, minHeight: "100vh", color: text, background: bgAccent }}>
-      {/* ── Header (no RL box; stronger brand pill) ── */}
-      <header style={{ marginBottom: 18 }}>
-        <h1 style={{ margin: 0, fontSize: 34, fontWeight: 900, lineHeight: 1.15 }}>
-          <span
+    <main style={{ padding: 24, background: PASTELS.bg, minHeight: "100vh" }}>
+      {/* Header */}
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
             style={{
-              padding: "6px 12px",
-              background: dark ? "rgba(239, 68, 68, 0.18)" : BRAND_RED_SOFT,
-              color: dark ? "#fecaca" : BRAND_RED,
-              borderRadius: 12,
-              border: `1px solid ${dark ? "#7f1d1d" : "#fecaca"}`,
-              boxShadow: shadow,
-              marginRight: 10,
+              width: 36,
+              height: 36,
+              borderRadius: 8,
+              background: PASTELS.pink,
+              color: "#1f2937",
+              fontWeight: 800,
+              display: "grid",
+              placeItems: "center",
             }}
           >
-            Red Label
-          </span>
-          <span style={{ letterSpacing: 0.2 }}>Sales Dashboard</span>
-        </h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10, justifyContent: "space-between" }}>
-          <div style={{ fontSize: 12, color: subtext }}>
-            Updated: {data?.updatedAt ? new Date(data.updatedAt).toLocaleString() : "—"}
+            RL
           </div>
+          <h1 style={{ margin: 0, color: PASTELS.text, fontWeight: 800 }}>Red Label Sales Dashboard</h1>
+        </div>
+
+        {/* Controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Mode toggle */}
+          <div style={{ display: "inline-flex", borderRadius: 10, overflow: "hidden", border: `1px solid ${PASTELS.border}` }}>
+            <button
+              onClick={() => setMode("RANGE")}
+              style={{
+                padding: "8px 12px",
+                background: mode === "RANGE" ? "#ffffff" : "#0b1223",
+                color: "#111827",
+                borderRight: `1px solid ${PASTELS.border}`,
+              }}
+              title="Show a rolling range (7/14/30/90 days)"
+            >
+              Range
+            </button>
+            <button
+              onClick={() => setMode("DAY")}
+              style={{
+                padding: "8px 12px",
+                background: mode === "DAY" ? "#f3f4f6" : "#0b1223",
+                color: "#111827",
+              }}
+              title="Show a single day"
+            >
+              Day
+            </button>
+          </div>
+
+          {/* Range selector */}
+          {mode === "RANGE" && (
+            <select
+              aria-label="Select days"
+              value={rangeDays}
+              onChange={(e) => setRangeDays(Number(e.target.value))}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: `1px solid ${PASTELS.border}`,
+                background: "#0b1223",
+                color: PASTELS.text,
+              }}
+            >
+              {[7, 14, 30, 90].map((n) => (
+                <option key={n} value={n}>
+                  Last {n} days
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Day picker */}
+          {mode === "DAY" && (
+            <input
+              type="date"
+              value={
+                selectedDate
+                  ? `${selectedDate.slice(6, 10)}-${selectedDate.slice(0, 2)}-${selectedDate.slice(3, 5)}`
+                  : ""
+              }
+              onChange={(e) => {
+                // convert YYYY-MM-DD to MM-DD-YYYY
+                const v = e.target.value; // YYYY-MM-DD
+                if (!v) {
+                  setSelectedDate("");
+                } else {
+                  const [yyyy, mm, dd] = v.split("-");
+                  setSelectedDate(`${mm}-${dd}-${yyyy}`);
+                }
+              }}
+              aria-label="Pick a date"
+              style={{
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: `1px solid ${PASTELS.border}`,
+                background: "#ffffff",
+                color: "#111827",
+              }}
+            />
+          )}
+
+          {/* Refresh */}
           <button
-            onClick={() => setDark((d) => !d)}
-            style={{
-              padding: "8px 12px", borderRadius: 10,
-              border: `1px solid ${border}`, background: panel, color: text,
-              cursor: "pointer", boxShadow: shadow,
+            onClick={() => {
+              if (mode === "RANGE") setRangeDays((d) => d); else setSelectedDate((d) => d);
             }}
-            title="Toggle dark mode"
+            aria-label="Refresh"
+            title="Refresh"
+            style={{
+              background: "#0b1223",
+              border: `1px solid ${PASTELS.border}`,
+              color: PASTELS.text,
+              borderRadius: 10,
+              padding: "8px 10px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
           >
-            {dark ? "Light" : "Dark"}
+            <RefreshCw size={16} /> Refresh
           </button>
         </div>
       </header>
 
-      {/* ── Controls ── */}
+      {/* Error / loading */}
+      {err && (
+        <div style={{ marginBottom: 12, color: "#fecaca" }}>
+          Failed to load: {err}
+        </div>
+      )}
+      {loading && (
+        <div style={{ marginBottom: 12, color: PASTELS.subtext }}>Loading…</div>
+      )}
+
+      {/* Header stats */}
       <section
         style={{
-          background: panel, border: `1px solid ${border}`, borderRadius: 16, padding: 12,
-          display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap", boxShadow: shadow,
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gap: 12,
+          marginBottom: 18,
         }}
       >
-        <div style={{ display: "inline-flex", border: `1px solid ${border}`, borderRadius: 12, overflow: "hidden" }}>
-          <Tab label="Range" active={mode === "RANGE"} onClick={() => setMode("RANGE")} panel={panel} border={border} text={text} dark={dark} />
-          <Tab label="Day" active={mode === "DAY"} onClick={() => setMode("DAY")} panel={panel} border={border} text={text} dark={dark} />
-        </div>
-
-        {mode === "RANGE" ? (
-          <div style={{ display: "inline-flex", gap: 8 }}>
-            {[7, 14, 30, 90].map((n) => (
-              <button
-                key={n}
-                onClick={() => setRangeDays(n)}
-                style={{
-                  padding: "9px 13px", borderRadius: 12, border: `1px solid ${border}`,
-                  background: rangeDays === n ? (dark ? "#1f2937" : "#eef2ff") : panel,
-                  color: text, cursor: "pointer", boxShadow: shadow, fontWeight: 700,
-                }}
-                title={`Last ${n} days`}
-              >
-                {n}d
-              </button>
-            ))}
-          </div>
-        ) : (
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <span style={{ color: subtext, fontSize: 12 }}>Pick date</span>
-            <input
-              type="date"
-              value={pickedDate}
-              onChange={(e) => setPickedDate(e.target.value)}
-              style={{
-                padding: "9px 12px", borderRadius: 12, border: `1px solid ${border}`,
-                background: panel, color: text, outline: "none", boxShadow: shadow,
-              }}
-            />
-          </label>
-        )}
-
-        {loading && <span style={{ marginLeft: 8, fontSize: 12, color: subtext }}>Loading…</span>}
-        {!!errorMsg && <span style={{ marginLeft: 8, fontSize: 12, color: dark ? "#fca5a5" : "#b91c1c" }}>{errorMsg}</span>}
+        <StatCard label={mode === "DAY" ? "Total Sales (Day)" : "Total Sales"} value={headerStats.totalSales ?? 0} />
+        <StatCard label={mode === "DAY" ? "Agents (Day)" : "Total Agents"} value={headerStats.totalAgents ?? 0} />
+        <StatCard label="Avg per Rep" value={headerStats.avgPerAgent ?? "0.00"} />
+        <StatCard label={mode === "DAY" ? "Agents (Day)" : "Avg Daily Agents"} value={headerStats.avgDailyAgents ?? 0} />
       </section>
 
-      {/* ── KPI cards (tinted pastels) ── */}
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 14, marginBottom: 18 }}>
-        <TintStat title={`Total Sales${kpis.labelSuffix}`} value={fmtNum(kpis.totalSales)} tint={PASTELS.red} dark={dark} />
-        <TintStat title={`Total Agents${kpis.labelSuffix}`} value={fmtNum(kpis.totalAgents)} tint={PASTELS.green} dark={dark} />
-        <TintStat title={`Avg per Rep${kpis.labelSuffix ? " (mean)" : " (daily mean)"}`} value={String(kpis.avgPerAgent)} tint={PASTELS.blue} dark={dark} />
-        <TintStat title={`Avg Daily Agents${kpis.labelSuffix}`} value={String(kpis.avgDailyAgents)} tint={PASTELS.amber} dark={dark} />
-      </section>
-
-      {/* ── Charts ── */}
-      <section style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16, marginBottom: 18 }}>
-        {mode === "RANGE" ? (
-          <Panel title="Sales Per Day" panel={panel} border={border} sub={subtext} shadow={shadow}>
-            <div style={{ width: "100%", height: 320 }}>
-              <ResponsiveContainer>
-                <AreaChart data={(data?.salesPerDay ?? []).map((d: any) => ({ ...d, sales: Number(d.sales || 0) }))}>
-                  <defs>
-                    <linearGradient id="gradSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={PASTELS.blue} stopOpacity={0.5} />
-                      <stop offset="95%" stopColor={PASTELS.blue} stopOpacity={0.05} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={border} />
-                  <XAxis dataKey="date" stroke={subtext} />
-                  <YAxis stroke={subtext} />
-                  <Tooltip />
-                  <Legend />
-                  <Area type="monotone" dataKey="sales" stroke={PASTELS.blue} fillOpacity={1} fill="url(#gradSales)" strokeWidth={3} />
-                  <Line type="monotone" dataKey="sales" stroke={PASTELS.blue} strokeWidth={2} dot={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </Panel>
-        ) : (
-          <Panel title={`Sales by Agent — ${data?.date || "Selected Day"}`} panel={panel} border={border} sub={subtext} shadow={shadow}>
-            <div style={{ width: "100%", height: 360 }}>
-              <ResponsiveContainer>
-                <BarChart data={(data?.perAgentKPI ?? []).map((r: any) => ({ agent: r.agent, sales: Number(r.sales || 0) }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={border} />
-                  <XAxis dataKey="agent" stroke={subtext} />
-                  <YAxis stroke={subtext} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="sales" fill={PASTELS.red} radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Panel>
-        )}
-
-        {/* Stacked bar */}
-        <Panel title={mode === "DAY" ? "Agent Share (Selected Day)" : "Top Agents — Share per Day (stacked)"} panel={panel} border={border} sub={subtext} shadow={shadow}>
-          <div style={{ width: "100%", height: 380 }}>
+      {/* Sales per day (Range only) */}
+      {mode === "RANGE" && (
+        <Panel title="Sales Per Day">
+          <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <BarChart data={stacked.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke={border} />
-                <XAxis dataKey="date" stroke={subtext} />
-                <YAxis stroke={subtext} />
+              <BarChart data={rangeData?.salesPerDay ?? []}>
+                <CartesianGrid strokeDasharray="3 3" stroke={PASTELS.border} />
+                <XAxis dataKey="date" stroke={PASTELS.subtext} />
+                <YAxis stroke={PASTELS.subtext} />
                 <Tooltip />
                 <Legend />
-                {(stacked.keys as string[]).map((k: string, i: number) => {
-  const colors = [PASTELS.purple, PASTELS.sky, PASTELS.coral, PASTELS.mint, PASTELS.pink, PASTELS.lime];
-  return <Bar key={k} dataKey={k} stackId="a" fill={colors[i % colors.length]} radius={[6, 6, 0, 0]} />;
-})}
+                <Bar dataKey="sales" fill={PASTELS.red} radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </Panel>
-      </section>
+      )}
 
-      {/* ── Leaderboard ── */}
-      <section>
-        <Panel title="Agent Leaderboard" panel={panel} border={border} sub={subtext} shadow={shadow}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ textAlign: "left", color: subtext }}>
-                  <Th
-                    onClick={() => {
-                      setSortKey("agent");
-                      setSortDir((d) => (sortKey === "agent" ? (d === "asc" ? "desc" : "asc") : "asc"));
+      {/* KPI % per Agent (Day)  OR  Stacked Share (Range) */}
+      <div style={{ height: 16 }} />
+      <Panel
+        title={mode === "DAY" ? "KPI Achievement by Agent (%) — Selected Day" : "Top Agents — Share per Day (stacked)"}
+      >
+        {mode === "DAY" && (dayData?.perAgentKPI?.length ?? 0) > 0 ? (
+          <>
+            {/* Day KPI badges */}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+              <span style={{ padding: "6px 10px", borderRadius: 999, background: PASTELS.chip, color: "#111827" }}>
+                Day KPI Goal: <b>{dayData?.dayGoal ?? 0}</b>
+              </span>
+              <span style={{ padding: "6px 10px", borderRadius: 999, background: PASTELS.chip, color: "#111827" }}>
+                Sales so far: <b>{dayData?.totalKPI ?? 0}</b>
+              </span>
+              <span style={{ padding: "6px 10px", borderRadius: 999, background: PASTELS.chip, color: "#111827" }}>
+                % of KPI: <b>{Math.round((dayData?.dayPercent ?? 0) * 10) / 10}%</b>
+              </span>
+            </div>
+
+            {/* KPI bar chart */}
+            <div style={{ width: "100%", height: 440 }}>
+              <ResponsiveContainer>
+                <BarChart
+                  data={[...(dayData?.perAgentKPI ?? [])]
+                    .map((r) => ({
+                      agent: r.agent,
+                      percent: Math.round((r.percent ?? 0) * 10) / 10,
+                      sales: r.sales,
+                      goal: r.goal,
+                      status: r.status,
+                    }))
+                    .sort((a, b) => b.percent - a.percent)}
+                  layout="vertical"
+                  margin={{ top: 10, right: 30, left: 120, bottom: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke={PASTELS.border} />
+                  <XAxis
+                    type="number"
+                    domain={[0, 150]}
+                    tick={{ fill: PASTELS.subtext }}
+                    stroke={PASTELS.subtext}
+                    tickFormatter={(v) => `${v}%`}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="agent"
+                    tick={{ fill: PASTELS.subtext }}
+                    stroke={PASTELS.subtext}
+                    width={160}
+                  />
+                  <ReferenceLine x={100} stroke="#9ca3af" strokeDasharray="4 4" />
+                  <Tooltip
+                    formatter={(value: any, _name: any, props: any) => {
+                      const d = props?.payload || {};
+                      return [
+                        `${value}%  •  Sales: ${d.sales} / Goal: ${d.goal} (${d.status || "PT"})`,
+                        "KPI",
+                      ];
                     }}
-                    active={sortKey === "agent"}
-                    border={border}
+                  />
+                  <Legend />
+                  <Bar
+                    dataKey="percent"
+                    fill={PASTELS.coral}
+                    radius={[6, 6, 6, 6]}
+                    isAnimationActive={false}
                   >
-                    Agent {sortKey === "agent" ? (sortDir === "asc" ? "▲" : "▼") : ""}
-                  </Th>
-                  <Th
-                    onClick={() => {
-                      setSortKey("sales");
-                      setSortDir((d) => (sortKey === "sales" ? (d === "asc" ? "desc" : "asc") : "desc"));
-                    }}
-                    active={sortKey === "sales"}
-                    border={border}
-                  >
-                    Sales {sortKey === "sales" ? (sortDir === "asc" ? "▲" : "▼") : ""}
-                  </Th>
-                </tr>
-              </thead>
-              <tbody>
-                {(leaderboard ?? []).map((row: any, idx: number) => (
-                  <tr key={row.agent + idx} style={{ borderTop: `1px solid ${border}` }}>
-                    <td style={{ padding: "10px 8px", fontWeight: 600 }}>{row.agent}</td>
-                    <td style={{ padding: "10px 8px", fontWeight: 800 }}>{fmtNum(Number(row.sales || 0))}</td>
-                  </tr>
-                ))}
-                {(!leaderboard || leaderboard.length === 0) && (
-                  <tr>
-                    <td colSpan={2} style={{ padding: 12, color: subtext }}>No data</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                    <LabelList dataKey="percent" position="right" formatter={(v: any) => `${v}%`} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        ) : (
+          // RANGE fallback: stacked share of top agents
+          <div style={{ width: "100%", height: 380 }}>
+            <ResponsiveContainer>
+              <BarChart data={stacked.data}>
+                <CartesianGrid strokeDasharray="3 3" stroke={PASTELS.border} />
+                <XAxis dataKey="date" stroke={PASTELS.subtext} />
+                <YAxis stroke={PASTELS.subtext} />
+                <Tooltip />
+                <Legend />
+                {(stacked.keys as string[]).map((k: string, i: number) => {
+                  const colors = [PASTELS.purple, PASTELS.sky, PASTELS.coral, PASTELS.mint, PASTELS.pink, PASTELS.lime];
+                  return (
+                    <Bar key={k} dataKey={k} stackId="a" fill={colors[i % colors.length]} radius={[6, 6, 0, 0]} />
+                  );
+                })}
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-        </Panel>
-      </section>
+        )}
+      </Panel>
+
+      {/* Leaderboard (simple) */}
+      <div style={{ height: 16 }} />
+      <Panel title="Agent Leaderboard">
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: PASTELS.subtext }}>
+                <th style={{ padding: "8px 6px" }}>Agent</th>
+                <th style={{ padding: "8px 6px" }}>{mode === "DAY" ? "Sales (Day)" : "Sales"}</th>
+                {mode === "DAY" && <th style={{ padding: "8px 6px" }}>KPI %</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {mode === "DAY"
+                ? (dayData?.perAgentKPI ?? [])
+                    .slice()
+                    .sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0))
+                    .map((r) => (
+                      <tr key={r.agent} style={{ color: PASTELS.text, borderTop: `1px solid ${PASTELS.border}` }}>
+                        <td style={{ padding: "10px 6px" }}>{r.agent}</td>
+                        <td style={{ padding: "10px 6px" }}>{r.sales}</td>
+                        <td style={{ padding: "10px 6px" }}>{Math.round((r.percent ?? 0) * 10) / 10}%</td>
+                      </tr>
+                    ))
+                : (rangeData?.agentLeaderboard ?? []).map((r) => (
+                    <tr key={r.agent} style={{ color: PASTELS.text, borderTop: `1px solid ${PASTELS.border}` }}>
+                      <td style={{ padding: "10px 6px" }}>{r.agent}</td>
+                      <td style={{ padding: "10px 6px" }}>{r.sales}</td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
     </main>
-  );
-}
-
-/* ───────────────── UI PIECES ───────────────── */
-
-// KPI with tinted pastel background
-function TintStat({ title, value, tint, dark }: { title: string; value: string; tint: string; dark: boolean }) {
-  const bg = dark ? "rgba(255,255,255,0.03)" : "#ffffff";
-  const tintBg = `linear-gradient(180deg, ${tint}33, ${tint}14)`; // soft overlay
-  const border = dark ? "rgba(255,255,255,0.08)" : "#e5e7eb";
-  const text = dark ? "#e5e7eb" : "#0f172a";
-  const sub = dark ? "#9ca3af" : "#475569";
-  const shadow = dark ? "0 10px 24px rgba(0,0,0,0.25)" : "0 10px 24px rgba(17,24,39,0.07)";
-  return (
-    <div
-      style={{
-        background: `${tintBg}, ${bg}`,
-        border: `1px solid ${border}`,
-        borderRadius: 18,
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        boxShadow: shadow,
-      }}
-    >
-      <div style={{ fontSize: 12, color: sub }}>{title}</div>
-      <div style={{ fontSize: 30, fontWeight: 900, color: text }}>{value}</div>
-    </div>
-  );
-}
-
-function Panel({ title, children, panel, border, sub, shadow }: any) {
-  return (
-    <div style={{ background: panel, border: `1px solid ${border}`, borderRadius: 18, padding: 16, boxShadow: shadow }}>
-      <div style={{ fontWeight: 900, marginBottom: 10, color: sub }}>{title}</div>
-      {children}
-    </div>
-  );
-}
-function Th({ children, onClick, active, border }: any) {
-  return (
-    <th
-      onClick={onClick}
-      style={{
-        padding: "10px 8px",
-        borderBottom: `1px solid ${border}`,
-        cursor: "pointer",
-        userSelect: "none",
-        whiteSpace: "nowrap",
-        fontWeight: active ? 900 : 700,
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-function Tab({ active, onClick, label, panel, border, text, dark }: any) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "9px 13px",
-        background: active ? (dark ? "#1f2937" : "#eef2ff") : panel,
-        color: text,
-        borderRight: `1px solid ${border}`,
-        cursor: "pointer",
-        fontWeight: 800,
-      }}
-      title={label}
-    >
-      {label}
-    </button>
   );
 }
