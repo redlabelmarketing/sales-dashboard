@@ -1,5 +1,6 @@
 "use client";
-
+const [sortKey, setSortKey] = useState<'agent' | 'sales' | 'percent'>('sales');
+const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer,
@@ -15,19 +16,22 @@ import {
 } from "recharts";
 import { RefreshCw, Moon, Sun } from "lucide-react";
 type Theme = {
-  bg: string; panel: string; border: string; text: string; subtext: string; chip: string;
+  bg: string; panel: string; border: string; text: string; subtext: string;
+  chipBg: string; chipText: string;
   purple: string; sky: string; coral: string; mint: string; pink: string; lime: string; red: string;
   card: string;
 };
 /** ---------- Themes ---------- */
 const THEMES: Record<"dark"|"light", Theme> = {
   dark: {
-    bg: "#0f172a", panel: "#0b1223", border: "#243244", text: "#e5e7eb", subtext: "#9ca3af", chip: "#e5e7eb",
+    bg: "#0f172a", panel: "#0b1223", border: "#243244", text: "#e5e7eb", subtext: "#9ca3af",
+    chipBg: "#111827", chipText: "#e5e7eb",
     purple: "#b3a3ff", sky: "#9bd2ff", coral: "#ffb6a1", mint: "#a8f0d1", pink: "#ffc0cb", lime: "#c7f59f", red: "#f87171",
     card: "#111827",
   },
   light: {
-    bg: "#f7f8fb", panel: "#ffffff", border: "#e5e7eb", text: "#111827", subtext: "#6b7280", chip: "#111827",
+    bg: "#f7f8fb", panel: "#ffffff", border: "#e5e7eb", text: "#111827", subtext: "#6b7280",
+    chipBg: "#111827", chipText: "#ffffff",
     purple: "#7c6cf2", sky: "#3ba4f6", coral: "#ff8f70", mint: "#49d3a6", pink: "#ff7ea8", lime: "#8ddf4f", red: "#ef4444",
     card: "#ffffff",
   },
@@ -88,19 +92,19 @@ function Panel({
   );
 }
 
-function StatCard({ label, value, T }: { label: string; value: React.ReactNode; T: typeof THEMES.dark }) {
+function StatCard({ label, value, color }: { label: string; value: React.ReactNode; color: string }) {
   return (
     <div
       style={{
-        background: T.card,
-        border: `1px solid ${T.border}`,
-        borderRadius: 14,
-        padding: 16,
-        boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+        background: `linear-gradient(180deg, ${color}22, transparent)`, // 0x22 alpha tint
+        border: `1px solid ${border}`,
+        borderRadius: 16,
+        padding: 20,
+        boxShadow: shadow,
       }}
     >
-      <div style={{ color: T.subtext, fontSize: 12, marginBottom: 6 }}>{label}</div>
-      <div style={{ color: T.text, fontSize: 22, fontWeight: 800 }}>{value}</div>
+      <div style={{ color: subtext, fontWeight: 600, marginBottom: 8 }}>{label}</div>
+      <div style={{ color: T.text, fontSize: 28, fontWeight: 700 }}>{value}</div>
     </div>
   );
 }
@@ -358,34 +362,46 @@ export default function DashboardPage() {
       {loading && <div style={{ marginBottom: 12, color: T.subtext }}>Loading…</div>}
 
       {/* Header stats */}
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-          gap: 12,
-          marginBottom: 18,
-        }}
-      >
-        <StatCard label={mode === "DAY" ? "Total Sales (Day)" : "Total Sales"} value={headerStats?.totalSales ?? 0} T={T} />
-<StatCard label={mode === "DAY" ? "Agents (Day)" : "Total Agents"} value={headerStats?.totalAgents ?? 0} T={T} />
-<StatCard label="Avg per Rep" value={headerStats?.avgPerAgent ?? "0.00"} T={T} />
-<StatCard label={mode === "DAY" ? "Agents (Day)" : "Avg Daily Agents"} value={headerStats?.avgDailyAgents ?? 0} T={T} />
-      </section>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 16 }}>
+  <StatCard label={mode === "DAY" ? "Total Sales (Day)" : "Total Sales"} value={headerStats?.totalSales ?? 0} color={PASTELS.pink} />
+  <StatCard label={mode === "DAY" ? "Agents (Day)" : "Total Agents"} value={headerStats?.totalAgents ?? 0} color={PASTELS.mint} />
+  <StatCard label="Avg per Rep" value={headerStats?.avgPerAgent ?? "0.00"} color={PASTELS.sky} />
+  <StatCard label={mode === "DAY" ? "Agents (Day)" : "Avg Daily Agents"} value={headerStats?.avgDailyAgents ?? 0} color={PASTELS.purple} />
+</div>
 
       {/* RANGE: Sales per day */}
       {mode === "RANGE" && (
         <Panel title="Sales Per Day" T={T}>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <BarChart data={rangeData?.salesPerDay ?? []}>
-                <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                <XAxis dataKey="date" stroke={T.subtext} />
-                <YAxis stroke={T.subtext} />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="sales" fill={T.red} radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+  <BarChart
+    data={kpiBars}
+    margin={{ top: 8, right: 36, bottom: 8, left: 220 }}   // was smaller before
+    layout="vertical"
+  >
+    <CartesianGrid strokeDasharray="3 3" stroke={border} />
+    <XAxis type="number" domain={[0, 200]} tick={{ fill: subtext }} />
+    <YAxis
+      type="category"
+      dataKey="agent"
+      width={220}
+      tick={{ fill: subtext, fontSize: 14 }}
+      tickLine={false}
+    />
+    <Tooltip />
+    <Legend />
+    <Bar
+      dataKey="percent"
+      fill={PASTELS.coral}
+      radius={[6, 6, 6, 6]}
+      label={{
+        position: "right",
+        formatter: (v: number) => `${(Math.round(v * 10) / 10).toFixed(1)}%`,
+        fill: T.text,                       // important for light mode
+      }}
+    />
+  </BarChart>
+</ResponsiveContainer>
           </div>
         </Panel>
       )}
@@ -396,19 +412,21 @@ export default function DashboardPage() {
       {mode === "DAY" ? (
         <>
           {/* KPI badges */}
-          <Panel title="KPI Summary — Selected Day" T={T}>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <span style={{ padding: "6px 10px", borderRadius: 999, background: T.chip, color: "#111827" }}>
-                Day KPI Goal: <b>{dayData?.dayGoal ?? 0}</b>
-              </span>
-              <span style={{ padding: "6px 10px", borderRadius: 999, background: T.chip, color: "#111827" }}>
-                Sales so far: <b>{dayData?.totalKPI ?? 0}</b>
-              </span>
-              <span style={{ padding: "6px 10px", borderRadius: 999, background: T.chip, color: "#111827" }}>
-                % of KPI: <b>{Math.round((dayData?.dayPercent ?? 0) * 10) / 10}%</b>
-              </span>
-            </div>
-          </Panel>
+          function Chip({ children }:{children: React.ReactNode}) {
+  return (
+    <span style={{ padding: "8px 14px", borderRadius: 999, background: T.chipBg, color: T.chipText, fontWeight: 600 }}>
+      {children}
+    </span>
+  );
+}
+<Panel title="KPI Summary — Selected Day" T={T}>
+  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+    <Chip>Day KPI Goal: <b style={{ color: T.chipText }}>{dayData?.dayGoal ?? 0}</b></Chip>
+    <Chip>Sales so far: <b style={{ color: T.chipText }}>{dayData?.totalKPI ?? 0}</b></Chip>
+    <Chip>% of KPI: <b style={{ color: T.chipText }}>{Math.round((dayData?.dayPercent ?? 0) * 10) / 10}%</b></Chip>
+  </div>
+</Panel>
+
 
           <div style={{ height: 16 }} />
 
@@ -492,39 +510,98 @@ export default function DashboardPage() {
       )}
 
       {/* Leaderboard */}
-      <div style={{ height: 16 }} />
-      <Panel title="Agent Leaderboard" T={T}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ textAlign: "left", color: T.subtext }}>
-                <th style={{ padding: "8px 6px" }}>Agent</th>
-                <th style={{ padding: "8px 6px" }}>{mode === "DAY" ? "Sales (Day)" : "Sales"}</th>
-                {mode === "DAY" && <th style={{ padding: "8px 6px" }}>KPI %</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {mode === "DAY"
-                ? (dayData?.perAgentKPI ?? [])
-                    .slice()
-                    .sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0))
-                    .map((r) => (
-                      <tr key={r.agent} style={{ color: T.text, borderTop: `1px solid ${T.border}` }}>
-                        <td style={{ padding: "10px 6px" }}>{r.agent}</td>
-                        <td style={{ padding: "10px 6px" }}>{r.sales}</td>
-                        <td style={{ padding: "10px 6px" }}>{Math.round((r.percent ?? 0) * 10) / 10}%</td>
-                      </tr>
-                    ))
-                : (rangeData?.agentLeaderboard ?? []).map((r) => (
-                    <tr key={r.agent} style={{ color: T.text, borderTop: `1px solid ${T.border}` }}>
-                      <td style={{ padding: "10px 6px" }}>{r.agent}</td>
-                      <td style={{ padding: "10px 6px" }}>{r.sales}</td>
-                    </tr>
-                  ))}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-    </main>
-  );
-}
+<div style={{ height: 16 }} />
+<Panel title="Agent Leaderboard" T={T}>
+  <div style={{ overflowX: "auto" }}>
+    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <thead>
+        <tr style={{ textAlign: "left", color: T.subtext }}>
+          <th
+            style={{ padding: "8px 6px", cursor: "pointer", userSelect: "none" }}
+            onClick={() => {
+              const nextDir = sortKey === "agent" ? (sortDir === "asc" ? "desc" : "asc") : "asc";
+              setSortKey("agent"); setSortDir(nextDir);
+            }}
+            title="Sort by Agent"
+          >
+            Agent {sortKey === "agent" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+          </th>
+
+          <th
+            style={{ padding: "8px 6px", cursor: "pointer", userSelect: "none" }}
+            onClick={() => {
+              const nextDir = sortKey === "sales" ? (sortDir === "asc" ? "desc" : "asc") : "desc";
+              setSortKey("sales"); setSortDir(nextDir);
+            }}
+            title="Sort by Sales"
+          >
+            {mode === "DAY" ? "Sales (Day)" : "Sales"}
+            {sortKey === "sales" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+          </th>
+
+          {mode === "DAY" && (
+            <th
+              style={{ padding: "8px 6px", cursor: "pointer", userSelect: "none" }}
+              onClick={() => {
+                const nextDir = sortKey === "percent" ? (sortDir === "asc" ? "desc" : "asc") : "desc";
+                setSortKey("percent"); setSortDir(nextDir);
+              }}
+              title="Sort by KPI %"
+            >
+              KPI % {sortKey === "percent" ? (sortDir === "asc" ? "▲" : "▼") : ""}
+            </th>
+          )}
+        </tr>
+      </thead>
+
+      <tbody>
+        {mode === "DAY"
+          ? (dayData?.perAgentKPI ?? [])
+              .slice()
+              .sort((a, b) => {
+                if (sortKey === "agent") {
+                  const A = (a.agent || "").toLowerCase();
+                  const B = (b.agent || "").toLowerCase();
+                  return sortDir === "asc" ? A.localeCompare(B) : B.localeCompare(A);
+                } else if (sortKey === "percent") {
+                  const A = a.percent ?? 0;
+                  const B = b.percent ?? 0;
+                  return sortDir === "asc" ? A - B : B - A;
+                } else {
+                  const A = a.sales ?? 0;
+                  const B = b.sales ?? 0;
+                  return sortDir === "asc" ? A - B : B - A;
+                }
+              })
+              .map((r) => (
+                <tr key={r.agent} style={{ color: T.text, borderTop: `1px solid ${T.border}` }}>
+                  <td style={{ padding: "10px 6px" }}>{r.agent}</td>
+                  <td style={{ padding: "10px 6px" }}>{r.sales}</td>
+                  <td style={{ padding: "10px 6px" }}>
+                    {Math.round((r.percent ?? 0) * 10) / 10}%
+                  </td>
+                </tr>
+              ))
+          : (rangeData?.agentLeaderboard ?? [])
+              .slice()
+              .sort((a, b) => {
+                if (sortKey === "agent") {
+                  const A = (a.agent || "").toLowerCase();
+                  const B = (b.agent || "").toLowerCase();
+                  return sortDir === "asc" ? A.localeCompare(B) : B.localeCompare(A);
+                } else {
+                  const A = a.sales ?? 0;
+                  const B = b.sales ?? 0;
+                  return sortDir === "asc" ? A - B : B - A;
+                }
+              })
+              .map((r) => (
+                <tr key={r.agent} style={{ color: T.text, borderTop: `1px solid ${T.border}` }}>
+                  <td style={{ padding: "10px 6px" }}>{r.agent}</td>
+                  <td style={{ padding: "10px 6px" }}>{r.sales}</td>
+                </tr>
+              ))}
+      </tbody>
+    </table>
+  </div>
+</Panel>
