@@ -1,607 +1,482 @@
 "use client";
-const [sortKey, setSortKey] = useState<'agent' | 'sales' | 'percent'>('sales');
-const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ReferenceLine,
-  LabelList,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { RefreshCw, Moon, Sun } from "lucide-react";
-type Theme = {
-  bg: string; panel: string; border: string; text: string; subtext: string;
-  chipBg: string; chipText: string;
-  purple: string; sky: string; coral: string; mint: string; pink: string; lime: string; red: string;
-  card: string;
-};
-/** ---------- Themes ---------- */
-const THEMES: Record<"dark"|"light", Theme> = {
-  dark: {
-    bg: "#0f172a", panel: "#0b1223", border: "#243244", text: "#e5e7eb", subtext: "#9ca3af",
-    chipBg: "#111827", chipText: "#e5e7eb",
-    purple: "#b3a3ff", sky: "#9bd2ff", coral: "#ffb6a1", mint: "#a8f0d1", pink: "#ffc0cb", lime: "#c7f59f", red: "#f87171",
-    card: "#111827",
-  },
-  light: {
-    bg: "#f7f8fb", panel: "#ffffff", border: "#e5e7eb", text: "#111827", subtext: "#6b7280",
-    chipBg: "#111827", chipText: "#ffffff",
-    purple: "#7c6cf2", sky: "#3ba4f6", coral: "#ff8f70", mint: "#49d3a6", pink: "#ff7ea8", lime: "#8ddf4f", red: "#ef4444",
-    card: "#ffffff",
-  },
-};
+import { RefreshCw } from "lucide-react";
 
 const DASHBOARD_API = "/api/dashboard";
 
-/** ---------- Types ---------- */
-type AgentKPI = { agent: string; sales: number; status?: "FT" | "PT"; goal?: number; percent?: number };
-type SalesPerDay = { date: string; sales: number };
-type AgentDaily = { date: string; byAgent: AgentKPI[] };
-
-type RangePayload = {
-  ok: boolean;
-  updatedAt?: string;
-  salesPerDay?: SalesPerDay[];
-  agentDaily?: AgentDaily[];
-  agentLeaderboard?: AgentKPI[];
-  totalSales?: number;
-  totalAgents?: number;
-  avgPerAgent?: number;
-  avgDailyAgents?: number;
+type Theme = {
+  bg: string; panel: string; border: string; text: string; subtext: string; chip: string;
+  purple: string; sky: string; coral: string; mint: string; pink: string; lime: string; red: string;
+  card: string;
+  pillBg: string; pillText: string; // NEW: legible pills in light mode
 };
 
-type DayPayload = {
-  ok: boolean;
-  date?: string; // YYYY-MM-DD
-  perAgentKPI?: AgentKPI[];
-  totalKPI?: number;
-  dayGoal?: number;
-  dayPercent?: number;
-  note?: string;
+const THEMES: Record<"dark" | "light", Theme> = {
+  dark: {
+    bg: "#0f172a", panel: "#0b1223", border: "#243244", text: "#e5e7eb", subtext: "#9ca3af", chip: "#e5e7eb",
+    purple: "#b3a3ff", sky: "#9bd2ff", coral: "#ffb6a1", mint: "#a8f0d1", pink: "#ffc0cb", lime: "#c7f59f", red: "#f87171",
+    card: "#111827",
+    pillBg: "#1f2937", pillText: "#e5e7eb",
+  },
+  light: {
+    bg: "#f7f8fb", panel: "#ffffff", border: "#e5e7eb", text: "#111827", subtext: "#6b7280", chip: "#111827",
+    purple: "#7c6cf2", sky: "#3ba4f6", coral: "#ff8f70", mint: "#49d3a6", pink: "#ff7ea8", lime: "#8ddf4f", red: "#ef4444",
+    card: "#ffffff",
+    pillBg: "#eef2f7", pillText: "#111827", // light slate chip
+  },
 };
 
-/** ---------- UI helpers ---------- */
-function Panel({
-  title,
-  children,
+const PASTELS = { purple: "#b3a3ff", sky: "#9bd2ff", coral: "#ffb6a1", mint: "#a8f0d1", pink: "#ffc0cb", lime: "#c7f59f", red: "#f87171" };
+
+// Helpers to convert date formats (TOP-LEVEL, not inside a component or JSX)
+const toYmd = (mmddyyyy: string) => {
+  const [mm, dd, yyyy] = mmddyyyy.split("-");
+  return `${yyyy}-${mm}-${dd}`;
+};
+const fromYmd = (ymd: string) => {
+  const [yyyy, mm, dd] = ymd.split("-");
+  return `${mm}-${dd}-${yyyy}`;
+};
+
+function StatCard({
+  label,
+  value,
+  accent,
   T,
+  isDark,
 }: {
-  title: string;
-  children: React.ReactNode;
-  T: typeof THEMES.dark;
+  label: string;
+  value: string | number;
+  accent: string;
+  T: Theme;
+  isDark: boolean;
 }) {
   return (
-    <section
-      style={{
-        background: T.panel,
-        border: `1px solid ${T.border}`,
-        borderRadius: 16,
-        padding: 16,
-        boxShadow: "0 6px 20px rgba(0,0,0,0.12)",
-      }}
-    >
-      <h3 style={{ margin: 0, marginBottom: 12, color: T.text, fontWeight: 700 }}>{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function StatCard({ label, value, color }: { label: string; value: React.ReactNode; color: string }) {
-  return (
     <div
-      style={{
-        background: `linear-gradient(180deg, ${color}22, transparent)`, // 0x22 alpha tint
-        border: `1px solid ${border}`,
-        borderRadius: 16,
-        padding: 20,
-        boxShadow: shadow,
-      }}
-    >
-      <div style={{ color: subtext, fontWeight: 600, marginBottom: 8 }}>{label}</div>
-      <div style={{ color: T.text, fontSize: 28, fontWeight: 700 }}>{value}</div>
+  style={{
+  background: T.panel,
+  // No "border" or "borderColor" shorthand here:
+  borderStyle: "solid",
+  borderWidth: 1,
+  // set non-top sides explicitly
+  borderLeftColor: T.border,
+  borderRightColor: T.border,
+  borderBottomColor: T.border,
+  // top side (accent)
+  borderTopWidth: 4,
+  borderTopStyle: "solid",
+  borderTopColor: accent,
+  borderRadius: 14,
+  padding: "16px 18px",
+  boxShadow: "0 8px 18px rgba(0,0,0,0.06)",
+  minWidth: 260,
+  color: T.text,
+}}
+>
+      <div style={{ color: T.subtext, fontSize: 12, marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 700 }}>{value}</div>
     </div>
   );
 }
 
-/** ---------- Data fetchers ---------- */
-async function fetchRange(n: number): Promise<RangePayload> {
-  const res = await fetch(`${DASHBOARD_API}?days=${encodeURIComponent(n)}`);
-  return res.json();
-}
-async function fetchDay(mmddyyyy: string): Promise<DayPayload> {
-  const res = await fetch(`${DASHBOARD_API}?date=${encodeURIComponent(mmddyyyy)}`);
-  return res.json();
+// soft shadow tuned for light/dark
+function shadowSoft(T: Theme) {
+  return T === THEMES.dark ? "0 10px 24px rgba(0,0,0,0.35)" : "0 8px 18px rgba(0,0,0,0.08)";
 }
 
-/** ---------- Page ---------- */
+function hexWithAlpha(hex: string, a: number) {
+  // accepts #rrggbb, returns rgba
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return hex;
+  const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+type RangeData = {
+  totalSales: number;
+  totalAgents: number;
+  avgPerAgent: number;
+  avgDailyAgents: number;
+  salesPerDay: { date: string; sales: number }[];
+  agentLeaderboard: { agent: string; sales: number }[];
+};
+type DayRow = { agent: string; sales: number; status?: "FT" | "PT"; target?: number; percent?: number };
+type DayData = {
+  totalKPI: number;
+  perAgentKPI: DayRow[];
+  dayGoal?: number;
+  dayPercent?: number;
+};
+
 export default function DashboardPage() {
-  // Theme
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
-  useEffect(() => {
-    const stored = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
-    if (stored === "light" || stored === "dark") setTheme(stored);
-  }, []);
-  useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("theme", theme);
-  }, [theme]);
+  const [mode, setMode] = useState<"DAY" | "RANGE">("DAY");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const T = THEMES[theme];
 
-  // Data mode
-  const [mode, setMode] = useState<"RANGE" | "DAY">("RANGE");
+  const [date, setDate] = useState<string>(() => {
+    const d = new Date(); const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0"); const yyyy = d.getFullYear();
+    return `${mm}-${dd}-${yyyy}`;
+  });
   const [rangeDays, setRangeDays] = useState<number>(30);
-  const [selectedDate, setSelectedDate] = useState<string>(""); // MM-DD-YYYY
-  const [rangeData, setRangeData] = useState<RangePayload | null>(null);
-  const [dayData, setDayData] = useState<DayPayload | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [err, setErr] = useState<string>("");
 
-  // Fetch
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      try {
-        setLoading(true);
-        setErr("");
-        if (mode === "RANGE") {
-          const json = await fetchRange(rangeDays);
-          if (!cancel) setRangeData(json);
-        } else if (mode === "DAY" && selectedDate) {
-          const json = await fetchDay(selectedDate);
-          if (!cancel) setDayData(json);
-        }
-      } catch (e: any) {
-        if (!cancel) setErr(String(e?.message || e));
-      } finally {
-        if (!cancel) setLoading(false);
-      }
-    })();
-    return () => {
-      cancel = true;
-    };
-  }, [mode, rangeDays, selectedDate]);
+  const [rangeData, setRangeData] = useState<RangeData | null>(null);
+  const [dayData, setDayData] = useState<DayData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
 
-  /** Stacked series for RANGE */
-  const stacked = useMemo<{ data: any[]; keys: string[] }>(() => {
-    if (mode !== "RANGE") return { data: [], keys: [] };
-    const daily = rangeData?.agentDaily ?? [];
-    // top 6 agents overall
-    const counts: Record<string, number> = {};
-    daily.forEach((d) =>
-      (d.byAgent || []).forEach((r) => {
-        counts[r.agent] = (counts[r.agent] || 0) + r.sales;
-      })
-    );
-    const top = Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([name]) => name);
-    const rows = daily.map((d) => {
-      const row: any = { date: d.date };
-      top.forEach((name) => {
-        const found = d.byAgent.find((x) => x.agent === name);
-        row[name] = found ? found.sales : 0;
-      });
-      return row;
-    });
-    return { data: rows, keys: top };
-  }, [mode, rangeData?.agentDaily]);
+  async function fetchRange(n: number) {
+    setLoading(true); setErrorText(null);
+    try {
+      const url = `${DASHBOARD_API}?days=${encodeURIComponent(n)}`;
+      const res = await fetch(url); const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "Upstream error");
+      setRangeData(json as RangeData);
+    } catch (e: any) { setErrorText(String(e?.message || e)); } finally { setLoading(false); }
+  }
+  async function fetchDay(mmddyyyy: string) {
+    setLoading(true); setErrorText(null);
+    try {
+      const url = `${DASHBOARD_API}?date=${encodeURIComponent(mmddyyyy)}`;
+      const res = await fetch(url); const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "Upstream error");
+      setDayData(json as DayData);
+    } catch (e: any) { setErrorText(String(e?.message || e)); } finally { setLoading(false); }
+  }
 
-  // Header stats
+  useEffect(() => { mode === "DAY" ? fetchDay(date) : fetchRange(rangeDays); }, []); // initial load
+  useEffect(() => { if (mode === "DAY") fetchDay(date); }, [date, mode]);
+  useEffect(() => { if (mode === "RANGE") fetchRange(rangeDays); }, [rangeDays, mode]);
+
   const headerStats = useMemo(() => {
     if (mode === "DAY") {
-      const totalAgents = dayData?.perAgentKPI?.length ?? 0;
       const totalSales = dayData?.totalKPI ?? 0;
-      const avgPerAgent = totalAgents ? (totalSales / totalAgents).toFixed(2) : "0.00";
-      const avgDailyAgents = totalAgents;
-      return { totalSales, totalAgents, avgPerAgent, avgDailyAgents };
-    } else {
+      const agentsDay = dayData?.perAgentKPI?.length ?? 0;
+      const avg = agentsDay ? (totalSales / agentsDay) : 0;
       return {
-        totalSales: rangeData?.totalSales ?? 0,
-        totalAgents: rangeData?.totalAgents ?? 0,
-        avgPerAgent: (rangeData?.avgPerAgent ?? 0).toFixed(2),
-        avgDailyAgents: rangeData?.avgDailyAgents ?? 0,
+        totalSales, totalAgents: agentsDay, avgPerAgent: avg.toFixed(2), avgDailyAgents: agentsDay,
       };
     }
+    return {
+      totalSales: rangeData?.totalSales ?? 0,
+      totalAgents: rangeData?.totalAgents ?? 0,
+      avgPerAgent: (rangeData?.avgPerAgent ?? 0).toFixed(2),
+      avgDailyAgents: rangeData?.avgDailyAgents ?? 0,
+    };
   }, [mode, dayData, rangeData]);
 
+  // Leaderboard sort (Agent / Sales / KPI%)
+  const [sortKey, setSortKey] = useState<"agent" | "sales" | "percent">("percent");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const sortedDayRows = useMemo(() => {
+    if (!dayData?.perAgentKPI) return [];
+    const rows = [...dayData.perAgentKPI];
+    rows.sort((a, b) => {
+      const av = sortKey === "agent" ? a.agent.toLowerCase() :
+        sortKey === "sales" ? (a.sales ?? 0) : (a.percent ?? 0);
+      const bv = sortKey === "agent" ? b.agent.toLowerCase() :
+        sortKey === "sales" ? (b.sales ?? 0) : (b.percent ?? 0);
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+    return rows;
+  }, [dayData, sortKey, sortDir]);
+
+  // Stacked-style “KPI % by agent” chart uses day rows
+  const kpiChartData = useMemo(() => {
+  const rows = dayData?.perAgentKPI ?? [];
+  return rows.map((r) => {
+    const baseTarget = r.target ?? (r.status === "FT" ? 6.5 : 4);
+    const raw =
+      r.percent ??
+      (baseTarget ? ((r.sales ?? 0) / baseTarget) * 100 : 0);
+    const percent = Number.isFinite(raw) ? raw : 0;
+    return { agent: r.agent, percent };
+  });
+}, [dayData]);
+
+  const salesChartData = useMemo(() => {
+    return (dayData?.perAgentKPI ?? []).map(r => ({ agent: r.agent, sales: r.sales ?? 0 }));
+  }, [dayData]);
+
+  const SubtleButton: React.FC<
+  React.ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }
+> = ({ active, style, ...props }) => (
+  <button
+    {...props}
+    style={{
+      padding: "8px 12px",
+      border: `1px solid ${T.border}`,
+      background: active
+        ? (theme === "dark" ? "#1f2937" : "#ffffff")
+        : (theme === "dark" ? "#0b1223" : "#f3f4f6"),
+      color: T.text,
+      borderRadius: 8,
+      cursor: "pointer",
+      ...(style || {}),
+    }}
+  />
+);
+
+  const Panel: React.FC<{ title?: string; T: Theme; children: React.ReactNode }> = ({ title, T, children }) => (
+  <section
+    style={{
+      background: T.panel,
+      borderWidth: 1,
+      borderStyle: "solid",
+      borderColor: T.border,
+      borderRadius: 12,
+      boxShadow: shadowSoft(T),
+      padding: 16,
+      color: T.text,
+      marginBottom: 16,
+    }}
+  >
+    {title && <h3 style={{ margin: 0, marginBottom: 10, color: T.text }}>{title}</h3>}
+    {children}
+  </section>
+);
+
+  const Th: React.FC<{
+    children: React.ReactNode; onClick?: () => void; active?: boolean;
+  }> = ({ children, onClick, active }) => (
+    <th
+      onClick={onClick}
+      title={onClick ? "Click to sort" : undefined}
+      style={{
+        padding: "8px 6px", cursor: onClick ? "pointer" : "default",
+        color: active ? T.text : T.subtext, whiteSpace: "nowrap",
+      }}
+    >
+      {children}{active ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+    </th>
+  );
+
   return (
-    <main style={{ padding: 24, background: T.bg, minHeight: "100vh" }}>
+    <main style={{ background: T.bg, minHeight: "100vh", padding: 24, color: T.text }}>
       {/* Header */}
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-        <div>
-          <h1
-            style={{
-              margin: 0,
-              fontWeight: 900,
-              fontSize: 26,
-              letterSpacing: 0.2,
-              backgroundImage:
-                theme === "dark"
-                  ? "linear-gradient(90deg,#ffc3e1,#b3a3ff,#a4d1ff)"
-                  : "linear-gradient(90deg,#ec4899,#7c6cf2,#3ba5f6)",
-              WebkitBackgroundClip: "text",
-              color: "transparent",
-            }}
-          >
-            Red Label Sales Dashboard
-          </h1>
-          <div style={{ color: T.subtext, marginTop: 4, fontSize: 12 }}>
-            {mode === "DAY" ? "Single‑day KPI view" : "Rolling range view"}
-          </div>
-        </div>
-
-        {/* Controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Theme toggle */}
-          <button
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            style={{
-              background: T.panel,
-              border: `1px solid ${T.border}`,
-              color: T.text,
-              borderRadius: 10,
-              padding: "8px 10px",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} Theme
-          </button>
-
-          {/* Mode toggle */}
-          <div style={{ display: "inline-flex", borderRadius: 10, overflow: "hidden", border: `1px solid ${T.border}` }}>
-            <button
-              onClick={() => setMode("RANGE")}
-              style={{
-                padding: "8px 12px",
-                background: mode === "RANGE" ? "#ffffff" : T.panel,
-                color: mode === "RANGE" ? "#111827" : T.text,
-                borderRight: `1px solid ${T.border}`,
-              }}
-              title="Show a rolling range (7/14/30/90 days)"
-            >
-              Range
-            </button>
-            <button
-              onClick={() => setMode("DAY")}
-              style={{
-                padding: "8px 12px",
-                background: mode === "DAY" ? (theme === "dark" ? "#f3f4f6" : "#eef2ff") : T.panel,
-                color: mode === "DAY" ? "#111827" : T.text,
-              }}
-              title="Show a single day"
-            >
-              Day
-            </button>
-          </div>
-
-          {/* Range selector */}
-          {mode === "RANGE" && (
-            <select
-              aria-label="Select days"
-              value={rangeDays}
-              onChange={(e) => setRangeDays(Number(e.target.value))}
-              style={{
-                padding: "8px 10px",
-                borderRadius: 10,
-                border: `1px solid ${T.border}`,
-                background: T.panel,
-                color: T.text,
-              }}
-            >
-              {[7, 14, 30, 90].map((n) => (
-                <option key={n} value={n}>
-                  Last {n} days
-                </option>
-              ))}
-            </select>
-          )}
-
-          {/* Day picker */}
-          {mode === "DAY" && (
-            <input
-              type="date"
-              value={
-                selectedDate
-                  ? `${selectedDate.slice(6, 10)}-${selectedDate.slice(0, 2)}-${selectedDate.slice(3, 5)}`
-                  : ""
-              }
-              onChange={(e) => {
-                const v = e.target.value;
-                if (!v) setSelectedDate("");
-                else {
-                  const [yyyy, mm, dd] = v.split("-");
-                  setSelectedDate(`${mm}-${dd}-${yyyy}`);
-                }
-              }}
-              aria-label="Pick a date"
-              style={{
-                padding: "8px 10px",
-                borderRadius: 10,
-                border: `1px solid ${T.border}`,
-                background: "#ffffff",
-                color: "#111827",
-              }}
-            />
-          )}
-
-          {/* Refresh */}
-          <button
-            onClick={() => {
-              if (mode === "RANGE") setRangeDays((d) => d);
-              else setSelectedDate((d) => d);
-            }}
-            aria-label="Refresh"
-            title="Refresh"
-            style={{
-              background: T.panel,
-              border: `1px solid ${T.border}`,
-              color: T.text,
-              borderRadius: 10,
-              padding: "8px 10px",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <RefreshCw size={16} /> Refresh
-          </button>
-        </div>
+      <header style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+        <h1
+          style={{
+            margin: 0, fontSize: 28, fontWeight: 800,
+            background: "linear-gradient(90deg,#ef4444,#8b5cf6,#22c55e)",
+            WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent",
+          }}
+        >
+          Red Label Sales Dashboard
+        </h1>
+        <div style={{ flex: 1 }} />
+        <SubtleButton onClick={() => setTheme(t => (t === "light" ? "dark" : "light"))} title="Theme">
+          Theme
+        </SubtleButton>
+        <SubtleButton onClick={() => setMode("RANGE")} active={mode === "RANGE"}>Range</SubtleButton>
+        <SubtleButton onClick={() => setMode("DAY")} active={mode === "DAY"}>Day</SubtleButton>
+        
+        <input
+  type="date"
+  lang="en-US"
+  value={toYmd(date)}
+  onChange={(e) => {
+    setDate(fromYmd(e.target.value));
+    setMode("DAY");
+  }}
+  style={{
+    padding: "8px 10px",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: T.border,
+    background: T.panel,
+    color: T.text,
+  }}
+  aria-label="Pick a date"
+/>
+        <SubtleButton onClick={() => (mode === "DAY" ? fetchDay(date) : fetchRange(rangeDays))} title="Refresh">
+          <RefreshCw size={16} style={{ verticalAlign: "-3px", marginRight: 6 }} />
+          Refresh
+        </SubtleButton>
       </header>
 
-      {/* Error / loading */}
-      {err && <div style={{ marginBottom: 12, color: theme === "dark" ? "#fecaca" : "#b91c1c" }}>Failed to load: {err}</div>}
-      {loading && <div style={{ marginBottom: 12, color: T.subtext }}>Loading…</div>}
+      {/* Stat cards */}
+      <section style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))" }}>
+  <StatCard
+    label={mode === "DAY" ? "Total Sales (Day)" : "Total Sales"}
+    value={headerStats.totalSales ?? 0}
+    accent={PASTELS.coral}
+    T={T}
+    isDark={theme === "dark"}
+  />
+  <StatCard
+    label={mode === "DAY" ? "Agents (Day)" : "Total Agents"}
+    value={headerStats.totalAgents ?? 0}
+    accent={PASTELS.purple}
+    T={T}
+    isDark={theme === "dark"}
+  />
+  <StatCard
+    label="Avg per Rep"
+    value={headerStats.avgPerAgent ?? "0.00"}
+    accent={PASTELS.mint}
+    T={T}
+    isDark={theme === "dark"}
+  />
+  <StatCard
+    label={mode === "DAY" ? "Agents (Day)" : "Avg Daily Agents"}
+    value={headerStats.avgDailyAgents ?? 0}
+    accent={PASTELS.sky}
+    T={T}
+    isDark={theme === "dark"}
+  />
+</section>
+      <div style={{ height: 14 }} />
 
-      {/* Header stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 16 }}>
-  <StatCard label={mode === "DAY" ? "Total Sales (Day)" : "Total Sales"} value={headerStats?.totalSales ?? 0} color={PASTELS.pink} />
-  <StatCard label={mode === "DAY" ? "Agents (Day)" : "Total Agents"} value={headerStats?.totalAgents ?? 0} color={PASTELS.mint} />
-  <StatCard label="Avg per Rep" value={headerStats?.avgPerAgent ?? "0.00"} color={PASTELS.sky} />
-  <StatCard label={mode === "DAY" ? "Agents (Day)" : "Avg Daily Agents"} value={headerStats?.avgDailyAgents ?? 0} color={PASTELS.purple} />
-</div>
+      {/* KPI summary pills */}
+      {mode === "DAY" && (
+        <Panel title="KPI Summary — Selected Day" T={T}>
+  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+    <span style={{ padding: "6px 10px", borderRadius: 999, background: T.pillBg, color: T.pillText }}>
+      Day KPI Goal: <b>{dayData?.dayGoal ?? 0}</b>
+    </span>
+    <span style={{ padding: "6px 10px", borderRadius: 999, background: T.pillBg, color: T.pillText }}>
+      Sales so far: <b>{dayData?.totalKPI ?? 0}</b>
+    </span>
+    <span style={{ padding: "6px 10px", borderRadius: 999, background: T.pillBg, color: T.pillText }}>
+  % of KPI: <b>
+    {(() => {
+      const goal = dayData?.dayGoal ?? 0;
+      const total = dayData?.totalKPI ?? 0;
+      const p = dayData?.dayPercent ?? (goal ? (total / goal) * 100 : 0);
+      return `${(Number.isFinite(p) ? p : 0).toFixed(1)}%`;
+    })()}
+  </b>
+</span>
+  </div>
+</Panel>
+      )}
 
-      {/* RANGE: Sales per day */}
-      {mode === "RANGE" && (
-        <Panel title="Sales Per Day" T={T}>
-          <div style={{ width: "100%", height: 320 }}>
+      <div style={{ height: 14 }} />
+
+      {/* KPI % chart (DAY) */}
+      {mode === "DAY" && (
+        <Panel title="KPI Achievement by Agent (%)" T={T}>
+          <div style={{ width: "100%", height: 420 }}>
             <ResponsiveContainer>
-  <BarChart
-    data={kpiBars}
-    margin={{ top: 8, right: 36, bottom: 8, left: 220 }}   // was smaller before
-    layout="vertical"
-  >
-    <CartesianGrid strokeDasharray="3 3" stroke={border} />
-    <XAxis type="number" domain={[0, 200]} tick={{ fill: subtext }} />
+  <BarChart data={kpiChartData} margin={{ left: 220, right: 24, top: 8, bottom: 8 }}>
+    <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+    <XAxis type="number" stroke={T.subtext} tick={{ fill: T.subtext }} domain={[0, 100]} />
     <YAxis
-      type="category"
       dataKey="agent"
+      type="category"
       width={220}
-      tick={{ fill: subtext, fontSize: 14 }}
+      tick={{ fill: T.subtext }}
+      interval={0}          // show all agent labels
       tickLine={false}
     />
     <Tooltip />
-    <Legend />
-    <Bar
-      dataKey="percent"
-      fill={PASTELS.coral}
-      radius={[6, 6, 6, 6]}
-      label={{
-        position: "right",
-        formatter: (v: number) => `${(Math.round(v * 10) / 10).toFixed(1)}%`,
-        fill: T.text,                       // important for light mode
-      }}
-    />
+    <Bar dataKey="percent" fill={PASTELS.coral} radius={[6, 6, 0, 0]} />
   </BarChart>
 </ResponsiveContainer>
           </div>
         </Panel>
       )}
 
-      {/* DAY: KPI % + Sales by Agent  OR  RANGE: Stacked share */}
-      <div style={{ height: 16 }} />
-
-      {mode === "DAY" ? (
+      {/* Sales-by-agent chart (DAY) */}
+      {mode === "DAY" && (
         <>
-          {/* KPI badges */}
-          function Chip({ children }:{children: React.ReactNode}) {
-  return (
-    <span style={{ padding: "8px 14px", borderRadius: 999, background: T.chipBg, color: T.chipText, fontWeight: 600 }}>
-      {children}
-    </span>
-  );
-}
-<Panel title="KPI Summary — Selected Day" T={T}>
-  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-    <Chip>Day KPI Goal: <b style={{ color: T.chipText }}>{dayData?.dayGoal ?? 0}</b></Chip>
-    <Chip>Sales so far: <b style={{ color: T.chipText }}>{dayData?.totalKPI ?? 0}</b></Chip>
-    <Chip>% of KPI: <b style={{ color: T.chipText }}>{Math.round((dayData?.dayPercent ?? 0) * 10) / 10}%</b></Chip>
-  </div>
-</Panel>
-
-
           <div style={{ height: 16 }} />
-
-          {/* KPI % per Agent */}
-          <Panel title="KPI Achievement by Agent (%)" T={T}>
-            <div style={{ width: "100%", height: 440 }}>
-              <ResponsiveContainer>
-                <BarChart
-                  data={[...(dayData?.perAgentKPI ?? [])]
-                    .map((r) => ({
-                      agent: r.agent,
-                      percent: Math.round((r.percent ?? 0) * 10) / 10,
-                      sales: r.sales,
-                      goal: r.goal,
-                      status: r.status,
-                    }))
-                    .sort((a, b) => b.percent - a.percent)}
-                  layout="vertical"
-                  margin={{ top: 10, right: 30, left: 120, bottom: 10 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                  <XAxis type="number" domain={[0, 150]} tick={{ fill: T.subtext }} stroke={T.subtext} tickFormatter={(v) => `${v}%`} />
-                  <YAxis type="category" dataKey="agent" tick={{ fill: T.subtext }} stroke={T.subtext} width={160} />
-                  <ReferenceLine x={100} stroke={T.subtext} strokeDasharray="4 4" />
-                  <Tooltip
-                    formatter={(value: any, _name: any, props: any) => {
-                      const d = props?.payload || {};
-                      return [`${value}%  •  Sales: ${d.sales} / Goal: ${d.goal} (${d.status || "PT"})`, "KPI"];
-                    }}
-                  />
-                  <Legend />
-                  <Bar dataKey="percent" fill={T.coral} radius={[6, 6, 6, 6]} isAnimationActive={false}>
-                    <LabelList dataKey="percent" position="right" formatter={(v: any) => `${v}%`} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Panel>
-
-          <div style={{ height: 16 }} />
-
-          {/* Sales by Agent (raw) */}
           <Panel title="Sales by Agent (Selected Day)" T={T}>
-            <div style={{ width: "100%", height: 380 }}>
+            <div style={{ width: "100%", height: 360 }}>
               <ResponsiveContainer>
-                <BarChart
-                  data={[...(dayData?.perAgentKPI ?? [])]
-                    .map((r) => ({ agent: r.agent, sales: r.sales }))
-                    .sort((a, b) => b.sales - a.sales)}
-                >
+                <BarChart data={salesChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                  <XAxis dataKey="agent" stroke={T.subtext} />
+                  <XAxis dataKey="agent" stroke={T.subtext} tick={{ fill: T.subtext }} interval={0} />
                   <YAxis stroke={T.subtext} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="sales" fill={T.purple} radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="sales" fill={PASTELS.purple} radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </Panel>
         </>
-      ) : (
-        // RANGE: Stacked share
-        <Panel title="Top Agents — Share per Day (stacked)" T={T}>
-          <div style={{ width: "100%", height: 380 }}>
-            <ResponsiveContainer>
-              <BarChart data={stacked.data}>
-                <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                <XAxis dataKey="date" stroke={T.subtext} />
-                <YAxis stroke={T.subtext} />
-                <Tooltip />
-                <Legend />
-                {(stacked.keys as string[]).map((k: string, i: number) => {
-                  const colors = [T.purple, T.sky, T.coral, T.mint, T.pink, T.lime];
-                  return <Bar key={k} dataKey={k} stackId="a" fill={colors[i % colors.length]} radius={[6, 6, 0, 0]} />;
-                })}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
       )}
 
       {/* Leaderboard */}
-<div style={{ height: 16 }} />
-<Panel title="Agent Leaderboard" T={T}>
-  <div style={{ overflowX: "auto" }}>
-    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-      <thead>
-        <tr style={{ textAlign: "left", color: T.subtext }}>
-          <th
-            style={{ padding: "8px 6px", cursor: "pointer", userSelect: "none" }}
-            onClick={() => {
-              const nextDir = sortKey === "agent" ? (sortDir === "asc" ? "desc" : "asc") : "asc";
-              setSortKey("agent"); setSortDir(nextDir);
-            }}
-            title="Sort by Agent"
-          >
-            Agent {sortKey === "agent" ? (sortDir === "asc" ? "▲" : "▼") : ""}
-          </th>
+      <div style={{ height: 16 }} />
+      <Panel title="Agent Leaderboard" T={T}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left" }}>
+  <Th
+    onClick={() => {
+      setSortKey("agent");
+      setSortDir(d => (sortKey === "agent" ? (d === "asc" ? "desc" : "asc") : "asc"));
+    }}
+    active={mode === "DAY" && sortKey === "agent"}
+  >
+    Agent
+  </Th>
+  <Th
+    onClick={() => {
+      setSortKey("sales");
+      setSortDir(d => (sortKey === "sales" ? (d === "asc" ? "desc" : "asc") : "desc"));
+    }}
+    active={mode === "DAY" && sortKey === "sales"}
+  >
+    {mode === "DAY" ? "Sales (Day)" : "Sales"}
+  </Th>
+  {mode === "DAY" && (
+    <Th
+      onClick={() => {
+        setSortKey("percent");
+        setSortDir(d => (sortKey === "percent" ? (d === "asc" ? "desc" : "asc") : "desc"));
+      }}
+      active={sortKey === "percent"}
+    >
+      KPI %
+    </Th>
+  )}
+</tr>
+            </thead>
+            <tbody>
+              {mode === "DAY"
+                ? sortedDayRows.map(r => (
+                    <tr key={r.agent} style={{ borderTop: `1px solid ${T.border}` }}>
+                      <td style={{ padding: "10px 6px" }}>{r.agent}</td>
+                      <td style={{ padding: "10px 6px" }}>{r.sales}</td>
+                      <td style={{ padding: "10px 6px" }}>{(r.percent ?? 0).toFixed(1)}%</td>
+                    </tr>
+                  ))
+                : (rangeData?.agentLeaderboard ?? []).map(r => (
+                    <tr
+  key={r.agent}
+  style={{
+    color: T.text,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: T.border,
+  }}
+>
+                      <td style={{ padding: "10px 6px" }}>{r.agent}</td>
+                      <td style={{ padding: "10px 6px" }}>{r.sales}</td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
 
-          <th
-            style={{ padding: "8px 6px", cursor: "pointer", userSelect: "none" }}
-            onClick={() => {
-              const nextDir = sortKey === "sales" ? (sortDir === "asc" ? "desc" : "asc") : "desc";
-              setSortKey("sales"); setSortDir(nextDir);
-            }}
-            title="Sort by Sales"
-          >
-            {mode === "DAY" ? "Sales (Day)" : "Sales"}
-            {sortKey === "sales" ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-          </th>
-
-          {mode === "DAY" && (
-            <th
-              style={{ padding: "8px 6px", cursor: "pointer", userSelect: "none" }}
-              onClick={() => {
-                const nextDir = sortKey === "percent" ? (sortDir === "asc" ? "desc" : "asc") : "desc";
-                setSortKey("percent"); setSortDir(nextDir);
-              }}
-              title="Sort by KPI %"
-            >
-              KPI % {sortKey === "percent" ? (sortDir === "asc" ? "▲" : "▼") : ""}
-            </th>
-          )}
-        </tr>
-      </thead>
-
-      <tbody>
-        {mode === "DAY"
-          ? (dayData?.perAgentKPI ?? [])
-              .slice()
-              .sort((a, b) => {
-                if (sortKey === "agent") {
-                  const A = (a.agent || "").toLowerCase();
-                  const B = (b.agent || "").toLowerCase();
-                  return sortDir === "asc" ? A.localeCompare(B) : B.localeCompare(A);
-                } else if (sortKey === "percent") {
-                  const A = a.percent ?? 0;
-                  const B = b.percent ?? 0;
-                  return sortDir === "asc" ? A - B : B - A;
-                } else {
-                  const A = a.sales ?? 0;
-                  const B = b.sales ?? 0;
-                  return sortDir === "asc" ? A - B : B - A;
-                }
-              })
-              .map((r) => (
-                <tr key={r.agent} style={{ color: T.text, borderTop: `1px solid ${T.border}` }}>
-                  <td style={{ padding: "10px 6px" }}>{r.agent}</td>
-                  <td style={{ padding: "10px 6px" }}>{r.sales}</td>
-                  <td style={{ padding: "10px 6px" }}>
-                    {Math.round((r.percent ?? 0) * 10) / 10}%
-                  </td>
-                </tr>
-              ))
-          : (rangeData?.agentLeaderboard ?? [])
-              .slice()
-              .sort((a, b) => {
-                if (sortKey === "agent") {
-                  const A = (a.agent || "").toLowerCase();
-                  const B = (b.agent || "").toLowerCase();
-                  return sortDir === "asc" ? A.localeCompare(B) : B.localeCompare(A);
-                } else {
-                  const A = a.sales ?? 0;
-                  const B = b.sales ?? 0;
-                  return sortDir === "asc" ? A - B : B - A;
-                }
-              })
-              .map((r) => (
-                <tr key={r.agent} style={{ color: T.text, borderTop: `1px solid ${T.border}` }}>
-                  <td style={{ padding: "10px 6px" }}>{r.agent}</td>
-                  <td style={{ padding: "10px 6px" }}>{r.sales}</td>
-                </tr>
-              ))}
-      </tbody>
-    </table>
-  </div>
-</Panel>
+      {errorText && (
+        <div style={{ marginTop: 16, color: T.red, fontWeight: 600 }}>
+          Failed to load: {errorText}
+        </div>
+      )}
+    </main>
+  );
+}
