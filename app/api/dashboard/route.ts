@@ -6,12 +6,14 @@ export async function GET(req: Request) {
   const days = searchParams.get("days");
   const date = searchParams.get("date");
   const diag = searchParams.get("diag");
+  const end = searchParams.get("end");
 
   const qs = new URLSearchParams();
   if (days) qs.set("days", days);
   if (date) qs.set("date", date);
+  if (end) qs.set("end", end);
   if (diag) qs.set("diag", diag);
-
+  
   const url = `${UPSTREAM}${qs.toString() ? "?" + qs.toString() : ""}`;
 
   try {

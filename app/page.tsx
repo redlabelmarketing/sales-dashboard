@@ -144,9 +144,11 @@ export default function DashboardPage() {
   const [errorText, setErrorText] = useState<string | null>(null);
 
   async function fetchRange(n: number) {
-  setLoading(true); setErrorText(null);
+  setLoading(true);
+  setErrorText(null);
   try {
-    const res = await fetch(`${DASHBOARD_API}?days=${encodeURIComponent(n)}`, { cache: "no-store" });
+    const url = `${DASHBOARD_API}?days=${encodeURIComponent(n)}&end=${encodeURIComponent(date)}`;
+    const res = await fetch(url);
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || "Upstream error");
     setRangeData(json);
@@ -156,19 +158,26 @@ export default function DashboardPage() {
     setLoading(false);
   }
 }
-  async function fetchDay(mmddyyyy: string) {
-    setLoading(true); setErrorText(null);
-    try {
-      const url = `${DASHBOARD_API}?date=${encodeURIComponent(mmddyyyy)}`;
-      const res = await fetch(url); const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "Upstream error");
-      setDayData(json as DayData);
-    } catch (e: any) { setErrorText(String(e?.message || e)); } finally { setLoading(false); }
-  }
 
-  useEffect(() => { mode === "DAY" ? fetchDay(date) : fetchRange(rangeDays); }, []); // initial load
+async function fetchDay(mmddyyyy: string) {
+  setLoading(true);
+  setErrorText(null);
+  try {
+    const url = `${DASHBOARD_API}?date=${encodeURIComponent(mmddyyyy)}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || "Upstream error");
+    setDayData(json);
+  } catch (e: any) {
+    setErrorText(String(e?.message || e));
+  } finally {
+    setLoading(false);
+  }
+}
+
+  useEffect(() => { mode === "DAY" ? fetchDay(date) : fetchRange(rangeDays, date); }, []); // initial load
   useEffect(() => { if (mode === "DAY") fetchDay(date); }, [date, mode]);
-  useEffect(() => { if (mode === "RANGE") fetchRange(rangeDays); }, [rangeDays, mode]);
+  useEffect(() => { if (mode === "RANGE") fetchRange(rangeDays, date); }, [rangeDays, mode, date]);
 
   const headerStats = useMemo(() => {
     if (mode === "DAY") {
@@ -292,15 +301,53 @@ const kpiChartData = useMemo(() => {
     <main style={{ background: T.bg, minHeight: "100vh", padding: 24, color: T.text }}>
       {/* Header */}
       <header style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
-        <h1
-          style={{
-            margin: 0, fontSize: 28, fontWeight: 800,
-            background: "linear-gradient(90deg,#ef4444,#8b5cf6,#22c55e)",
-            WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent",
-          }}
-        >
-          Red Label Sales Dashboard
-        </h1>
+        {(() => {
+  const isDark = theme === "dark";
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 20px",
+        borderRadius: 14,
+        background: isDark ? "#ffffff" : "#ef4444",   // white in dark mode, red in light
+        color: isDark ? "#ef4444" : "#ffffff",        // red text in dark, white in light
+        border: `1px solid ${isDark ? "#fca5a5" : "#dc2626"}`,
+        boxShadow: isDark
+          ? "0 8px 24px rgba(0,0,0,0.35)"
+          : "0 8px 18px rgba(239,68,68,0.35)",
+        fontWeight: 900,
+        letterSpacing: "1px",
+        textTransform: "uppercase",
+        fontSize: 26,
+        lineHeight: 1,
+        userSelect: "none",
+      }}
+      aria-label="Red Label Dashboard"
+    >
+      <span
+        style={{
+          display: "inline-grid",
+          placeItems: "center",
+          width: 28,
+          height: 28,
+          borderRadius: 8,
+          background: isDark ? "#ef4444" : "#ffffff",
+          color: isDark ? "#ffffff" : "#ef4444",
+          fontSize: 16,
+          fontWeight: 900,
+          boxShadow: isDark
+            ? "inset 0 0 0 1px #fecaca"
+            : "inset 0 0 0 1px #ffffff",
+        }}
+      >
+        RL
+      </span>
+      <span>Red Label Dashboard</span>
+    </div>
+  );
+})()}
         <div style={{ flex: 1 }} />
 
         <SubtleButton
@@ -311,8 +358,20 @@ const kpiChartData = useMemo(() => {
   {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
 </SubtleButton>
 
-<SubtleButton onClick={() => setMode("RANGE")} active={mode === "RANGE"}>Range</SubtleButton>
-<SubtleButton onClick={() => setMode("DAY")} active={mode === "DAY"}>Day</SubtleButton>
+
+<SubtleButton
+  onClick={() => { setMode("RANGE"); fetchRange(rangeDays); }}
+  active={mode === "RANGE"}
+>
+  Range
+</SubtleButton>
+
+<SubtleButton
+  onClick={() => setMode("DAY")}
+  active={mode === "DAY"}
+>
+  Day
+</SubtleButton>
 
 {/* Range selector (shows only when in RANGE mode) */}
 {mode === "RANGE" && (
@@ -359,10 +418,12 @@ const kpiChartData = useMemo(() => {
   aria-label="Pick a date"
 />
 
-        <SubtleButton onClick={() => (mode === "DAY" ? fetchDay(date) : fetchRange(rangeDays))} title="Refresh">
-          <RefreshCw size={16} style={{ verticalAlign: "-3px", marginRight: 6 }} />
-          Refresh
-        </SubtleButton>
+        <SubtleButton
+  onClick={() => (mode === "DAY" ? fetchDay(date) : fetchRange(rangeDays, date))}
+  title="Refresh"
+>
+  ...
+</SubtleButton>
       </header>
 
       {/* Stat cards */}
